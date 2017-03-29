@@ -1,0 +1,170 @@
+---
+title: "Practical Machine Learning Final Project"
+author: "Justin Mahoney"
+date: "March 28, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+#knitr::opts_chunk$set(echo = TRUE)
+
+knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/',
+                      echo=TRUE, warning=FALSE, message=FALSE)
+```
+
+##Background
+(From assignment Introduction)
+Devices such as Jawbone Up, Nike FuelBand, and Fitbit collect data about personal activity. They are used to improve health or to find patterns in behavior. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. The goal of this project is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har 
+
+##Raw Data
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. 
+
+load packages for this analysis
+```{r}
+#install.packages("nnet")
+library(nnet)
+library(caret)
+#install.packages("RCurl")
+library(RCurl)
+#install.packages("Metrics")
+library(Metrics)
+#install.packages("e1071")
+library(e1071)
+```
+
+Set working directory
+```{r}
+#Housekeeping
+#clear workspace of all files
+rm(list = ls())
+#set working directory
+setwd("C:\\Users\\justin.mahoney\\Desktop\\Final Project Practical ML")
+```
+
+##Data Preparation
+Read in Files from local directory (Training and Testing/Quiz data)
+```{r}
+AllDataCombined <- read.csv("C:\\Users\\justin.mahoney\\Desktop\\Final Project Practical ML\\pml-training AND testingCombined.csv")
+```
+
+Determine the most variales in the raw data set having the most variability - to keep those variables
+```{r}
+nsv <- nearZeroVar(AllDataCombined, saveMetrics=TRUE)
+nsv$nzv
+#removed variables from the dataset where 'near zero variance', nzv=TRUE
+```
+
+Remove the columns from the 'training' dataset having the least variability
+```{r}
+subsetAllDataCombined <- subset(AllDataCombined, select = -c(raw_timestamp_part_1, raw_timestamp_part_2,cvtd_timestamp, user_name, X,new_window,kurtosis_roll_belt,kurtosis_picth_belt,kurtosis_yaw_belt,skewness_roll_belt,skewness_roll_belt.1,skewness_yaw_belt,max_roll_belt,max_picth_belt,max_yaw_belt,min_roll_belt,min_pitch_belt,min_yaw_belt,amplitude_roll_belt,amplitude_pitch_belt,amplitude_yaw_belt,var_total_accel_belt,avg_roll_belt,stddev_roll_belt,var_roll_belt,avg_pitch_belt,stddev_pitch_belt,var_pitch_belt,avg_yaw_belt,stddev_yaw_belt,var_yaw_belt,var_accel_arm,avg_roll_arm,stddev_roll_arm,var_roll_arm,avg_pitch_arm,stddev_pitch_arm,var_pitch_arm,avg_yaw_arm,stddev_yaw_arm,var_yaw_arm,kurtosis_roll_arm,kurtosis_picth_arm,kurtosis_yaw_arm,skewness_roll_arm,skewness_pitch_arm,skewness_yaw_arm,max_roll_arm ,max_picth_arm,max_yaw_arm,min_roll_arm,min_pitch_arm ,min_yaw_arm,amplitude_roll_arm,amplitude_pitch_arm,amplitude_yaw_arm,kurtosis_roll_dumbbell,kurtosis_picth_dumbbell,kurtosis_yaw_dumbbell,skewness_roll_dumbbell,skewness_pitch_dumbbell,skewness_yaw_dumbbell,max_roll_dumbbell,max_picth_dumbbell,max_yaw_dumbbell,min_roll_dumbbell,min_pitch_dumbbell,min_yaw_dumbbell,amplitude_roll_dumbbell,amplitude_pitch_dumbbell,amplitude_yaw_dumbbell,var_accel_dumbbell,avg_roll_dumbbell,stddev_roll_dumbbell,var_roll_dumbbell,avg_pitch_dumbbell,stddev_pitch_dumbbell,var_pitch_dumbbell,avg_yaw_dumbbell,stddev_yaw_dumbbell,var_yaw_dumbbell,kurtosis_roll_forearm,kurtosis_picth_forearm,kurtosis_yaw_forearm,skewness_roll_forearm,skewness_pitch_forearm,skewness_yaw_forearm,max_roll_forearm,max_picth_forearm,max_yaw_forearm,min_roll_forearm,min_pitch_forearm,min_yaw_forearm,amplitude_roll_forearm,amplitude_pitch_forearm,amplitude_yaw_forearm,var_accel_forearm,avg_roll_forearm,stddev_roll_forearm,var_roll_forearm,avg_pitch_forearm,stddev_pitch_forearm,var_pitch_forearm,avg_yaw_forearm,stddev_yaw_forearm,var_yaw_forearm))
+minusQuizsubsetAllDataCombined <- subsetAllDataCombined[1:19622, ]
+QuizsubsetAllDataCombined <- subsetAllDataCombined[19623:19642, ]
+```
+##Analysis
+###Perform PCA (principal component analysis) on the reduced 'training' data set provided to created variables that are not correlated to one another
+```{r}
+l <- subset(minusQuizsubsetAllDataCombined, select = -c(classe))
+dim(l)
+pca <- princomp(l, score = TRUE, cor=TRUE)
+pcaSumm <- summary(pca)
+plot(pca)
+biplot(pca)
+```
+
+###Assemble transformed data created by PCA
+```{r}
+m <- pca$scores # create columns in transformed data set
+r <- data.frame (cbind (m)) #assemble 1st 27 tranformed columns into a new dataframe
+dim(r)
+classe <- minusQuizsubsetAllDataCombined$classe #isolate 'classe' column from training data
+str(classe)
+
+#bind 'classe' column to rr, the new transformed data frame
+r <- cbind(r,classe)
+dim(r)
+```
+
+###Create Training and Testing Data set
+```{r}
+inTrain <- createDataPartition(y=r$classe, p=0.7, list=FALSE)
+training <- r[inTrain, ]
+testing <- r[-inTrain, ]
+```
+
+###Train data by neural network
+```{r}
+modfit <- multinom(classe ~ ., data = training, maxit = 50 )
+```
+##Results
+###CROSSVALIDATION - Make predictions on testing set with using 'modfit'
+```{r}
+predict <- predict(modfit, type = "class", newdata = testing)
+predictProb <- predict(modfit, type = "probs", newdata = testing)
+head(predict, 5)
+head(predictProb, 5)
+#add 'prediction' column to 'testing' dataset
+Testing.predict <- cbind(testing, predict)
+#show confusion matrix of predictions
+table(Testing.predict$classe,Testing.predict$predict)
+#give accuracy of modfit: Accuracy=0.691 ; Kappa = 0.609
+postResample(Testing.predict$classe, predict)
+```
+
+###Diagnose/evaluate 'modfit'
+```{r}
+#sort by most influential variable
+## 'varImp' determines most influential variables in 'modfit'
+topModel <- varImp(modfit)
+topModel$Variables <- row.names(topModel)
+topModel <- topModel[order(topModel$Overall),]
+#shows the 5 most important variables in the model
+head(topModel)
+```
+
+###Test the quiz data using 'modfit'
+```{r}
+#transform quiz data by PCA
+l1 <- subset(subsetAllDataCombined, select = -c(classe))
+dim(l1)
+pca1 <- princomp(l1, score = TRUE, cor=TRUE)
+
+#Assemble transformed 'quiz data' created by PCA
+m1 <- pca1$scores # create columns in transformed data set
+
+r1 <- data.frame (cbind (m1)) #assemble tranformed columns into a new dataframe
+
+classe1 <- subsetAllDataCombined$classe #isolate 'classe' column from training data
+
+#bind 'classe1' column to r1, the new transformed data frame
+r1 <- cbind(r1,classe1)
+```
+
+Isolate the quiz dataset
+```{r}
+#isolate transformed quiz data
+quizTransform <- r1[19623:19642, ]
+```
+
+##Conclusion
+###Make predictions for the quiz data set
+```{r}
+#make prediction of quiz data
+predict1 <- predict(modfit, type = "class", newdata = quizTransform)
+predict1
+```
+*These are the predictions for the quiz(test) data
+
+
+
+
+
+
